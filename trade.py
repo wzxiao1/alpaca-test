@@ -5,11 +5,18 @@ from lumibot.traders import Trader
 from datetime import datetime
 from alpaca_trade_api import REST
 from timedelta import Timedelta
+from sentiment import get_sentiment
 
+api = []
+with open ("api.txt", 'r') as file:
+    lines = file.readlines()
+    for i in lines:
+        api.append(i.strip('\n'))
 
-API_KEY = "PKBRL1CPD54RFLCTPPD8"
-API_SECRET = "gEEoMSF6Ob7lsgv586PWNsZvZTWhy2R1nDn2Y7tx"
-BASE_URL = "https://paper-api.alpaca.markets/v2"
+API_KEY = api[0]
+API_SECRET = api[1]
+BASE_URL = api[2]
+
 
 ALPACA = {
     "API_KEY": API_KEY,
@@ -42,20 +49,21 @@ class Bot(Strategy):
         return today.strftime('%Y-%m-%d'), past.strftime('%Y-%m-%d')
 
     # news and sentiment of stock
-    def get_news(self):
+    def get_news_sentiment(self):
         today, past = self.get_dates()
         news = self.api.get_news(symbol = self.symbol, start= past, end=today)
         news = [ev.__dict__["_raw"]["headline"] for ev in news] 
-        return news
+        return get_sentiment(news)
 
 
     # trading logic
     def on_trading_iteration(self):
         cash, last_price, quantity = self.position_sizing()
+        sentiment = self.get_news_sentiment()
         if cash > last_price:
-            if self.last_trade == None:
-                news = self.get_news()
-                print(news)
+            if sentiment == "positive":
+                if self.last_trade == "sell":
+                    self.sell_all()
                 order = self.create_order(
                     self.symbol,
                     quantity,
@@ -66,6 +74,19 @@ class Bot(Strategy):
                 )
                 self.submit_order(order)
                 self.last_trade = "buy"
+            elif sentiment == "negative":
+                if self.last_trade == "buy":
+                    self.sell_all()
+                order = self.create_order(
+                    self.symbol,
+                    quantity,
+                    "sell",
+                    type="bracket",
+                    take_profit_price=last_price * 0.8,
+                    stop_loss_price= last_price * 1.05
+                )
+                self.submit_order(order)
+                self.last_trade = "sell"
 
 
 start_date = datetime(2024, 5, 15)
